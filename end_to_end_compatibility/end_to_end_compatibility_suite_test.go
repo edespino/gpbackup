@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -26,6 +27,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	"compress/gzip"
+	"archive/tar"
+
+
 )
 
 /* The backup directory must be unique per test. There is test flakiness
@@ -367,8 +372,11 @@ var _ = Describe("backup end to end integration tests", func() {
 				FIt("runs gpbackup and gprestore with plugin, single-data-file, and no-compression", func() {
 					const timestamp = "20190104163445"
 					const artifact = "artifacts/1.7.1/20190104163445-plugin_no_compress_single-data-file_backup.tar.gz"
+					//  IGNORE: metadata file modified
+
 					cwd, _ := os.Getwd()
 					pluginDir := "/tmp/plugin_dest"
+
 					err := os.RemoveAll(pluginDir)
 					if err != nil {
 						Fail("cannot remove directory " + pluginDir)
@@ -382,9 +390,8 @@ var _ = Describe("backup end to end integration tests", func() {
 						Fail("cannot change to directory: " + pluginDir)
 					}
 
-					// todo use golang tar because there is an OS problem, gtar on macos
-					cmd := exec.Command("gtar", "xzf", cwd+"/"+artifact)
-					mustRunCommand(cmd)
+					untargz(cwd+"/"+artifact)
+
 					pluginExecutablePath := fmt.Sprintf("%s/go/src/github.com/greenplum-db/gpbackup/plugins/example_plugin.sh", os.Getenv("HOME"))
 					copyPluginToAllHosts(backupConn, pluginExecutablePath)
 
@@ -1013,3 +1020,87 @@ func dropGlobalObjects(conn *dbconn.DBConn, dbExists bool) {
 		testhelper.AssertQueryRuns(conn, "DROP RESOURCE GROUP test_group;")
 	}
 }
+// source: https://socketloop.com/tutorials/golang-untar-or-extract-tar-ball-archive-example
+func untargz(source string) {
+         sourcefile := source
+
+         if sourcefile == "" {
+                 fmt.Println("Usage : go-untar sourcefile.tar")
+                 os.Exit(1)
+         }
+
+         file, err := os.Open(sourcefile)
+
+         if err != nil {
+                 fmt.Println(err)
+                 os.Exit(1)
+         }
+
+         defer file.Close()
+
+         var fileReader io.ReadCloser = file
+
+         // just in case we are reading a tar.gz file, add a filter to handle gzipped file
+         if strings.HasSuffix(sourcefile, ".gz") {
+                 if fileReader, err = gzip.NewReader(file); err != nil {
+
+                         fmt.Println(err)
+                         os.Exit(1)
+                 }
+                 defer fileReader.Close()
+         }
+
+         tarBallReader := tar.NewReader(fileReader)
+
+         // Extracting tarred files
+
+         for {
+                 header, err := tarBallReader.Next()
+                 if err != nil {
+                         if err == io.EOF {
+                                 break
+                         }
+                         fmt.Println(err)
+                         os.Exit(1)
+                 }
+
+                 // get the individual filename and extract to the current directory
+                 filename := header.Name
+
+                 switch header.Typeflag {
+                 case tar.TypeDir:
+                         // handle directory
+                         fmt.Println("Creating directory :", filename)
+                         err = os.MkdirAll(filename, os.FileMode(header.Mode)) // or use 0755 if you prefer
+
+                         if err != nil {
+                                 fmt.Println(err)
+                                 os.Exit(1)
+                         }
+
+                 case tar.TypeReg:
+                         // handle normal file
+                         fmt.Println("Untarring :", filename)
+                         writer, err := os.Create(filename)
+
+                         if err != nil {
+                                 fmt.Println(err)
+                                 os.Exit(1)
+                         }
+
+                         io.Copy(writer, tarBallReader)
+
+                         err = os.Chmod(filename, os.FileMode(header.Mode))
+
+                         if err != nil {
+                                 fmt.Println(err)
+                                 os.Exit(1)
+                         }
+
+                         writer.Close()
+                 default:
+                         fmt.Printf("Unable to untar type : %c in file %s", header.Typeflag, filename)
+                 }
+         }
+
+ }
