@@ -1,0 +1,50 @@
+PLATFORM: linux
+
+image_resource:
+  type: docker-image
+  source:
+    repository: pivotaldata/centos-gpdb-dev
+    tag: '6-gcc6.2-llvm3.7'
+
+inputs:
+- name: gpbackup
+  path: go/src/github.com/greenplum-db/gpbackup
+- name: cluster_env_files
+- name: gpdb_src
+- name: sqldump
+
+run:
+  path: bash
+  args:
+  - -c
+  - |
+    set -ex
+
+    ccp_src/scripts/setup_ssh_to_cluster.sh
+    ssh -t mdw 'mkdir -p /home/gpadmin/sqldump'
+    scp sqldump/* mdw:/home/gpadmin/sqldump/
+    ssh -t mdw 'xz -d /home/gpadmin/sqldump/dump.sql.xz'
+    
+    # (1) Generate & run script to load data to DB, backup the DB, and export the backup artifact
+    cat <<SCRIPT > /tmp/generate_backup_artifact.bash
+        set -ex
+        source env.sh
+
+        echo "##### Creating `regression` DB #####"
+        createdb regression
+        echo "##### Loading sqldump into `regression` DB #####"
+        psql -d regression -f /home/gpadmin/sqldump/dump.sql
+        echo "##### Backing up `regression` DB #####"
+        mkdir /tmp/backup_artifact
+        gpbackup --dbname regression --backup-dir /tmp/backup_artifact
+        tar -cfzv /tmp/backup_artifact.tar.gz /tmp/backup_artifact
+    SCRIPT
+
+    chmod +x /tmp/generate_backup_artifact.bash
+    scp /tmp/generate_backup_artifact.bash mdw:/home/gpadmin/generate_backup_artifact.bash
+    ssh -t mdw "bash /home/gpadmin/generate_backup_artifact.bash"
+    
+    mkdir /tmp/backup_artifact
+    scp mdw:/tmp/backup_artifact.tar.gz /tmp
+
+

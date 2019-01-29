@@ -1,0 +1,61 @@
+PLATFORM: linux
+
+image_resource:
+  type: docker-image
+  source:
+    repository: pivotaldata/centos-gpdb-dev
+    tag: '6-gcc6.2-llvm3.7'
+
+inputs:
+- name: gpbackup
+  path: go/src/github.com/greenplum-db/gpbackup
+- name: cluster_env_files
+- name: gpdb_src
+- name: sqldump
+- name: gpbackup_artifact
+
+run:
+  path: bash
+  args:
+  - -c
+  - |
+    set -ex
+
+    ccp_src/scripts/setup_ssh_to_cluster.sh
+    scp gpbackup_artifact/* mdw:/tmp
+    ssh -t mdw 'tar -zxf /tmp/gpbackup_artifact.tar.gz -C /tmp/'
+    
+    # (2) Generate & run script to restore the backedup data to a new cluster and generate a pg_dump
+    cat <<SCRIPT > /tmp/gprestore_and_dump.bash
+        set -ex
+        source env.sh
+
+        echo "##### Creating `regression` DB #####"
+        createdb regression
+
+        echo "##### Restore backup artifact into `regression` DB #####"
+        gprestore --dbname regression --backup-dir /tmp/backup_artifact
+
+        echo "##### pg_dump `regression` DB #####"
+        pg_dumpall -f /tmp/sqldump/final_dump.sql
+        xz -z /tmp/sqldump/final_dump.sql 
+    SCRIPT
+
+    chmod +x /tmp/gprestore_and_dump.bash
+    scp /tmp/gprestore_and_dump.bash mdw:/home/gpadmin/gprestore_and_dump.bash
+    ssh -t mdw "bash /home/gpadmin/gprestore_and_dump.bash"
+    
+    scp mdw:/tmp/sqldump/final_dump.sql.xz /tmp/
+
+    # (3) Compare sqldump resource and the pg_dump that was newly generated
+
+    xz -d sqldump/dump.sql.xz
+    xz -d /tmp/final_dump.sql.xz
+    output=$(diff dump.sql final_dump.sql)
+    retval=$?
+    if [ "${retval}" != "0" ] ; then
+      echo "${output}"
+      exit 1
+    fi
+
+
