@@ -261,6 +261,11 @@ ORDER BY a.attrelid, a.attnum;`, relationAndSchemaFilterClause())
 		err = connectionPool.Select(&results, masterQuery)
 	}
 
+	// Added to enable hijacking
+        //fmt.Println(fmt.Sprintf("masterQuery: ", masterQuery))
+
+	//
+
 	gplog.FatalOnError(err)
 	resultMap := make(map[uint32][]ColumnDefinition, 0)
 	for _, result := range results {

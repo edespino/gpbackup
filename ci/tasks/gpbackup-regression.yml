@@ -9,9 +9,13 @@ image_resource:
 inputs:
 - name: gpbackup
   path: go/src/github.com/greenplum-db/gpbackup
+- name: ccp_src
 - name: cluster_env_files
 - name: gpdb_src
 - name: sqldump
+
+outputs:
+- name: artifacts
 
 run:
   path: bash
@@ -24,27 +28,32 @@ run:
     ssh -t mdw 'mkdir -p /home/gpadmin/sqldump'
     scp sqldump/* mdw:/home/gpadmin/sqldump/
     ssh -t mdw 'xz -d /home/gpadmin/sqldump/dump.sql.xz'
-    
+
     # (1) Generate & run script to load data to DB, backup the DB, and export the backup artifact
     cat <<SCRIPT > /tmp/generate_backup_artifact.bash
         set -ex
         source env.sh
 
-        echo "##### Creating `regression` DB #####"
-        createdb regression
-        echo "##### Loading sqldump into `regression` DB #####"
-        psql -d regression -f /home/gpadmin/sqldump/dump.sql
-        echo "##### Backing up `regression` DB #####"
+        echo "##### Creating 'targetdb' DB #####"
+        createdb targetdb
+        echo "##### Loading sqldump into 'targetdb' DB #####"
+        psql -d targetdb -f /home/gpadmin/sqldump/dump.sql
+        echo "##### Backing up 'targetdb' DB #####"
         mkdir /tmp/backup_artifact
-        gpbackup --dbname regression --backup-dir /tmp/backup_artifact
-        tar -cfzv /tmp/backup_artifact.tar.gz /tmp/backup_artifact
+        gpbackup --dbname targetdb --backup-dir /tmp/backup_artifact --verbose
+        pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd
     SCRIPT
 
     chmod +x /tmp/generate_backup_artifact.bash
     scp /tmp/generate_backup_artifact.bash mdw:/home/gpadmin/generate_backup_artifact.bash
-    ssh -t mdw "bash /home/gpadmin/generate_backup_artifact.bash"
-    
-    mkdir /tmp/backup_artifact
-    scp mdw:/tmp/backup_artifact.tar.gz /tmp
+    ssh -t mdw "bash  /home/gpadmin/generate_backup_artifact.bash"
 
+    ssh -t sdw1 "pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd"
+
+    mkdir /tmp/gpbackup_allsegments
+    scp mdw:/tmp/backup_artifact.tar.gz  /tmp/gpbackup_allsegments/gpbackup_mdw.tar.gz
+    scp sdw1:/tmp/backup_artifact.tar.gz /tmp/gpbackup_allsegments/gpbackup_sdw1.tar.gz
+
+    pushd /tmp; tar czvf gpbackup_all.tar.gz gpbackup_allsegments ; popd
+    mv /tmp/gpbackup_all.tar.gz artifacts/
 

@@ -15,14 +15,14 @@ resources:
     region_name: {{aws-region}}
     versioned_file: gpdb6/icw_gporca_centos6/dump.sql.xz
 
-- name: gpbackup_artifact
+- name: backup_artifact
   type: s3
   source:
     access_key_id: {{bucket-access-key-id}}
     bucket: {{test-data-bucket-name}}
     secret_access_key: {{bucket-secret-access-key}}
     region_name: {{aws-region}}
-    versioned_file: gpbackup_artifact.tar.gz
+    versioned_file: gpdb6/icw_gporca_centos6/backup_artifact.tar.gz
 
 - name: gpbackup
   type: git
@@ -107,9 +107,9 @@ jobs:
   - task: load_regressionDB_into_cluster
     file: gpbackup/ci/tasks/gpbackup-regression.yml
     input_mapping: {sqldump: icw_gporca_centos6_dump}
-  - put: gpbackup_artifact
+  - put: backup_artifact
     params:
-      file: /tmp/gpbackup_artifact.tar.gz
+      file: artifacts/gpbackup_all.tar.gz
     on_success:
       <<: *ccp_destroy
   ensure:
@@ -123,7 +123,7 @@ jobs:
     - get: gpdb_src
     - get: ccp_src
     - get: icw_gporca_centos6_dump
-    - get: gpbackup_artifact
+    - get: backup_artifact
       trigger: true
     - get: dummy_seclabel
   - put: terraform
