@@ -24,6 +24,8 @@ run:
   - |
     set -ex
 
+    # assume greenplum is fresh and has only system databases
+
     ccp_src/scripts/setup_ssh_to_cluster.sh
     ssh -t mdw 'mkdir -p /home/gpadmin/sqldump'
     scp sqldump/* mdw:/home/gpadmin/sqldump/
@@ -31,17 +33,29 @@ run:
 
     # (1) Generate & run script to load data to DB, backup the DB, and export the backup artifact
     cat <<SCRIPT > /tmp/generate_backup_artifact.bash
-        set -ex
-        source env.sh
+      set -ex
+      source env.sh
 
-        echo "##### Creating 'targetdb' DB #####"
-        createdb targetdb
-        echo "##### Loading sqldump into 'targetdb' DB #####"
-        psql -d targetdb -f /home/gpadmin/sqldump/dump.sql
-        echo "##### Backing up 'targetdb' DB #####"
-        mkdir /tmp/backup_artifact
-        gpbackup --dbname targetdb --backup-dir /tmp/backup_artifact --verbose
-        pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd
+      mkdir /tmp/backup_artifact # parent dir for all backups
+
+      echo "##### Loading sqldump into DB #####"
+      psql -d postgres -f /home/gpadmin/sqldump/dump.sql
+
+      # iterate through all the databases (skipping system ones)
+      psql -t postgres -c "SELECT datname FROM pg_database WHERE datistemplate = false;" > /tmp/db_names
+      while read db ; do
+        [ -z "$db" ] && continue
+        dir="/tmp/backup_artifact/${db}"
+        mkdir "$dir"
+
+        echo "##### Backing up database: ${db} #####"
+        gpbackup --dbname "${db}" --backup-dir "${dir}" --verbose
+      done < /tmp/db_names
+
+      # TODO dump also globals and any other info
+
+      # create tarball of all backups by backing up parent dir
+      pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd
     SCRIPT
 
     chmod +x /tmp/generate_backup_artifact.bash

@@ -23,36 +23,54 @@ run:
     set -ex
 
     ccp_src/scripts/setup_ssh_to_cluster.sh
-    scp backup_artifact/* mdw:/tmp
-    ssh -t mdw 'pushd /tmp ; tar -zxf backup_artifact.tar.gz ; popd'
-    
+    cp -r backup_artifact /tmp
+
+    pushd /tmp/backup_artifact
+      tar -zxf backup_artifact.tar.gz
+      scp gpbackup_allsegments/gpbackup_mdw.tar.gz mdw:/tmp
+      scp gpbackup_allsegments/gpbackup_sdw1.tar.gz sdw1:/tmp
+    popd
+    ssh -t sdw1 'pushd /tmp ; tar -xzf gpbackup_sdw1.tar.gz ; popd'
+
     # (2) Generate & run script to restore the backedup data to a new cluster and generate a pg_dump
     cat <<SCRIPT > /tmp/gprestore_and_dump.bash
         set -ex
         source env.sh
 
-        echo "##### Creating 'targetdb' DB #####"
-        createdb targetdb
+        # extract backup tarball 
+        pushd /tmp
+          tar -xzf gpbackup_mdw.tar.gz
+          ls backup_artifact/ > /tmp/db_names 
+          
+          # for each DB, find the timestamp & restore
+          while read db ; do
+            [ -z "$db" ] && continue
+            find ./backup_artifact/\${db} -name "*_metadata.sql" | sed -nr 's#.*gpseg-2/backups/.*/([0-9]{14})/.*#\1#p' > /tmp/\${db}_timestamp
+            read timestamp < /tmp/\${db}_timestamp
+            echo "\${db} timestamp: \${timestamp}"
 
-        echo "##### Restore backup artifact into 'targetdb' DB #####"
-        gprestore --dbname targetdb --backup-dir /tmp/backup_artifact
+            echo "##### Restore backup artifact for \${db} DB #####"
+            gprestore --create-db --timestamp \${timestamp} --backup-dir /tmp/backup_artifact/\${db}
+          done < /tmp/db_names
 
-        echo "##### pg_dump 'targetdb' DB #####"
-        pg_dumpall -f /tmp/sqldump/final_dump.sql
-        xz -z /tmp/sqldump/final_dump.sql 
+        popd
+
+        echo "##### pg_dumpall #####"
+        pg_dumpall -f /tmp/final_dump.sql
+        xz -z /tmp/final_dump.sql
     SCRIPT
 
     chmod +x /tmp/gprestore_and_dump.bash
     scp /tmp/gprestore_and_dump.bash mdw:/home/gpadmin/gprestore_and_dump.bash
     ssh -t mdw "bash /home/gpadmin/gprestore_and_dump.bash"
     
-    scp mdw:/tmp/sqldump/final_dump.sql.xz /tmp/
+    scp mdw:/tmp/final_dump.sql.xz /tmp/
 
     # (3) Compare sqldump resource and the pg_dump that was newly generated
 
     xz -d sqldump/dump.sql.xz
     xz -d /tmp/final_dump.sql.xz
-    output=$(diff dump.sql final_dump.sql)
+    output=$(diff sqldump/dump.sql /tmp/final_dump.sql)
     retval=$?
     if [ "${retval}" != "0" ] ; then
       echo "${output}"
