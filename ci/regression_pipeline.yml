@@ -82,7 +82,7 @@ jobs:
   plan:
   - aggregate:
     - get: gpbackup
-      trigger: true
+      #trigger: true
     - get: bin_gpdb_master
     - get: gpdb_src
     - get: ccp_src
