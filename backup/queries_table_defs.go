@@ -235,7 +235,7 @@ SELECT
 	coalesce(pg_catalog.pg_get_expr(ad.adbin, ad.adrelid), '') AS defaultval,
 	coalesce(pg_catalog.array_to_string(a.attoptions, ','), '') AS options,
 	coalesce(array_to_string(ARRAY(SELECT option_name || ' ' || quote_literal(option_value) FROM pg_options_to_table(attfdwoptions) ORDER BY option_name), ', '), '') AS fdwoptions,
-	CASE WHEN a.attcollation <> t.typcollation THEN quote_ident(cn.nspname) || '.' || quote_ident(coll.collname) ELSE '' END AS collation,
+	coalesce(quote_ident(cn.nspname) || '.' || quote_ident(coll.collname), '') AS collation,
 	coalesce(sec.provider,'') AS securitylabelprovider,
 	coalesce(sec.label,'') AS securitylabel,
 	coalesce(d.description,'') AS comment
