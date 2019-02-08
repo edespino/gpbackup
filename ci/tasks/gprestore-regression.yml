@@ -12,7 +12,6 @@ inputs:
 - name: ccp_src
 - name: cluster_env_files
 - name: gpdb_src
-- name: sqldump
 - name: backup_artifact
 
 run:
@@ -33,6 +32,8 @@ run:
     ssh -t sdw1 'pushd /tmp ; tar -xzf gpbackup_sdw1.tar.gz ; popd'
 
     # (2) Generate & run script to restore the backedup data to a new cluster and generate a pg_dump
+    # do not fail here because might be possible for gpbackup to fail but still produce the same dump diff
+    set +e
     cat <<SCRIPT > /tmp/gprestore_and_dump.bash
         set -ex
         source env.sh
@@ -60,6 +61,7 @@ run:
         pg_dump regression -f /tmp/post_regression_dump.sql
         xz -z /tmp/post_regression_dump.sql
     SCRIPT
+    set -e
 
     chmod +x /tmp/gprestore_and_dump.bash
     scp /tmp/gprestore_and_dump.bash mdw:/home/gpadmin/gprestore_and_dump.bash
@@ -69,7 +71,7 @@ run:
 
     # (3) Compare sqldump resource and the pg_dump that was newly generated
 
-    xz -d sqldump/regression_dump.sql.xz
+    xz -d backup_artifact/regression_dump.sql.xz
     xz -d /tmp/post_regression_dump.sql.xz
     output=$(diff /tmp/regression.dump.sql /tmp/post_regression_dump.sql)
     retval=$?
