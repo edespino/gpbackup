@@ -122,6 +122,25 @@ var _ = Describe("backup end to end integration tests", func() {
 		if err != nil {
 			Fail("cannot change to directory: " + unpacked_artifacts_dir)
 		}
+
+		// #####  added to enable artifact usage
+		// for now, limit restoring to 5x (archive is from 5x)
+		if !(restoreConn.Version.AtLeast("5.0.0") &&
+			restoreConn.Version.Before("6.0.0")) {
+			Fail("cannot run compat with restore destination != 5x")
+		}
+
+		// role "pivotal" is required
+		username := operating.System.Getenv("PGUSER")
+		if username == "" {
+			currentUser, _ := operating.System.CurrentUser()
+			username = currentUser.Username
+		}
+		if username != "pivotal" {
+			Fail(`In destination database, please create a greenplum user "pivotal" and set PGUSER to "pivotal"`)
+		}
+		// #####  added to enable artifact usage
+
 	})
 	AfterSuite(func() {
 		if backupConn.Version.Before("6") {
@@ -149,6 +168,8 @@ var _ = Describe("backup end to end integration tests", func() {
 		if err != nil {
 			fmt.Printf("Could not drop restoredb: %v\n", err)
 		}
+		// added to clean up artifact untarring
+		_ = os.RemoveAll(os.TempDir())
 	})
 
 	Describe("end to end gpbackup and gprestore tests", func() {
@@ -385,34 +406,22 @@ var _ = Describe("backup end to end integration tests", func() {
 				BeforeEach(func() {
 					skipIfOldBackupVersionBefore("1.7.0")
 				})
-				FIt("runs gpbackup and gprestore with plugin, single-data-file, and no-compression", func() {
-
-					// for now, limit restoring to 5x (archive is from 5x)
-					if !(restoreConn.Version.AtLeast("5.0.0") &&
-						restoreConn.Version.Before("6.0.0")) {
-						Fail("cannot run compat with restore destination != 5x")
-					}
-
-					// role "pivotal" is required
-					username := operating.System.Getenv("PGUSER")
-					if username == "" {
-						currentUser, _ := operating.System.CurrentUser()
-						username = currentUser.Username
-					}
-					if username != "pivotal" {
-						Fail(`In destination database, please create a greenplum user "pivotal" and set PGUSER to "pivotal"`)
-					}
+				/*
+					Currently ... adapting this test to use the `actual`(not one-off) tarbal
+				*/
+				It("runs gpbackup and gprestore with plugin, single-data-file, and no-compression", func() {
 
 					const timestamp = "20190104163445"
-					const artifact = "artifacts/5.x/1.7.1/20190104163445-plugin_no_compress_single-data-file_backup.tar.gz"
-					cwd, _ := os.Getwd()
+					// const artifact = "artifacts/5.x/1.7.1/20190104163445-plugin_no_compress_single-data-file_backup.tar.gz"
+					const artifact = "20190104163445-plugin_no_compress_single-data-file_backup.tar.gz"
+					//cwd, _ := os.Getwd()
 					tempdir := os.TempDir()
 					err := os.Chdir(tempdir)
 					if err != nil {
 						Fail("cannot change to temporary directory: " + tempdir)
 					}
 
-					untargz(cwd + "/" + artifact)
+					untargz(unpacked_artifacts_dir + "/" + artifact)
 
 					pluginExecutablePath := fmt.Sprintf("%s/go/src/github.com/greenplum-db/gpbackup/plugins/example_plugin.sh", os.Getenv("HOME"))
 					copyPluginToAllHosts(backupConn, pluginExecutablePath)
@@ -429,12 +438,29 @@ var _ = Describe("backup end to end integration tests", func() {
 
 					_ = os.RemoveAll(tempdir)
 				})
-				It("runs gpbackup and gprestore with plugin and single-data-file", func() {
+				/*
+					Currently ... adapting this test to the new pattern
+				*/
+				FIt("runs gpbackup and gprestore with plugin and single-data-file", func() {
 					pluginDir := "/tmp/plugin_dest"
 					pluginExecutablePath := fmt.Sprintf("%s/go/src/github.com/greenplum-db/gpbackup/plugins/example_plugin.sh", os.Getenv("HOME"))
 					copyPluginToAllHosts(backupConn, pluginExecutablePath)
 
-					timestamp := gpbackup(gpbackupPath, backupHelperPath, "--single-data-file", "--plugin-config", pluginConfigPath)
+					// Artifact addition
+					err := os.MkdirAll(pluginDir, 0777)
+					if err != nil {
+						Fail("cannot create plugin directory for untarring backup: " + pluginDir)
+					}
+					timestamp := "20190206164848"
+					artifact := "20190206164848-plugin_single-data-file.tar.gz"
+					err = os.Chdir(pluginDir)
+					if err != nil {
+						Fail("cannot change to plugin directory: " + pluginDir)
+					}
+					untargz(unpacked_artifacts_dir + "/" + artifact)
+					// Artifact addition
+
+					//timestamp := gpbackup(gpbackupPath, backupHelperPath, "--single-data-file", "--plugin-config", pluginConfigPath)
 					forceMetadataFileDownloadFromPlugin(backupConn, timestamp)
 
 					gprestore(gprestorePath, restoreHelperPath, timestamp, "--redirect-db", "restoredb", "--plugin-config", pluginConfigPath)
