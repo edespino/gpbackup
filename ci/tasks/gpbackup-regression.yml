@@ -16,6 +16,7 @@ inputs:
 
 outputs:
 - name: artifacts
+- name: sqldump
 
 run:
   path: bash
@@ -41,6 +42,10 @@ run:
       echo "##### Loading sqldump into DB #####"
       psql -d postgres -f /home/gpadmin/sqldump/dump.sql
 
+      echo "##### Running pg_dump on regression DB #####"
+      pg_dump regression -f /tmp/regression_dump.sql
+      xz -z /tmp/regression_dump.sql
+
       # iterate through all the databases (skipping system ones)
       psql -t postgres -c "SELECT datname FROM pg_database WHERE datistemplate = false;" > /tmp/db_names
       # must use index rather than db name, to support special char db: "funny copy""db'with\\quotes"
@@ -55,8 +60,6 @@ run:
         gpbackup --dbname "\${db}" --backup-dir "\${dir}" #--verbose
       done < /tmp/db_names
 
-      # TODO dump also globals and any other info
-
       # create tarball of all backups by backing up parent dir
       pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd
     SCRIPT
@@ -68,6 +71,7 @@ run:
     ssh -t sdw1 "pushd /tmp ; tar -czvf backup_artifact.tar.gz backup_artifact ; popd"
 
     mkdir /tmp/gpbackup_allsegments
+    scp mdw:/tmp/regression_dump.sql.xz  sqldump/
     scp mdw:/tmp/backup_artifact.tar.gz  /tmp/gpbackup_allsegments/gpbackup_mdw.tar.gz
     scp sdw1:/tmp/backup_artifact.tar.gz /tmp/gpbackup_allsegments/gpbackup_sdw1.tar.gz
 
